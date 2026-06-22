@@ -3,12 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import {
   FileText, Clock, TrendingUp, AlertTriangle, Plus, Filter,
   Search, ChevronDown, ChevronRight, Eye, Printer, X, Calendar,
-  Building2, UserCheck,
+  Building2, UserCheck, Download,
 } from 'lucide-react';
 import { useAppStore } from '@/store';
 import StatCard from '@/components/business/StatCard';
 import StatusBadge from '@/components/ui/StatusBadge';
 import CustomerInfoCard from '@/components/business/CustomerInfoCard';
+import RefundVoucher from '@/components/business/RefundVoucher';
 import { formatCurrency, formatDateTime, formatPhone } from '@/utils/format';
 import type { ApplicationStatus } from '@/types';
 import dayjs from 'dayjs';
@@ -27,8 +28,11 @@ const ApplicationList = () => {
 
   const [showFilters, setShowFilters] = useState(false);
   const [selectedAppId, setSelectedAppId] = useState<string | null>(null);
+  const [showVoucher, setShowVoucher] = useState(false);
+  const [voucherAppId, setVoucherAppId] = useState<string | null>(null);
 
   const filtered = useMemo(() => getFilteredApplications(), [applicationsFilter]);
+  const voucherApp = voucherAppId ? filtered.find(a => a.id === voucherAppId) : null;
 
   const pendingCount = filtered.filter((a) => a.status === '待财务复核' || a.status === '待店长审批').length;
   const todayAmount = filtered
@@ -244,9 +248,9 @@ const ApplicationList = () => {
                               <Eye className="w-4 h-4" />
                             </button>
                             <button
-                              onClick={(e) => { e.stopPropagation(); }}
+                              onClick={(e) => { e.stopPropagation(); setVoucherAppId(app.id); setShowVoucher(true); }}
                               className="btn-ghost !px-2 !py-1"
-                              title="打印确认单"
+                              title="打印/导出退款确认单"
                             >
                               <Printer className="w-4 h-4" />
                             </button>
@@ -322,6 +326,20 @@ const ApplicationList = () => {
               </div>
 
               <div className="p-4 border-t border-neutral-100 bg-neutral-50 space-y-2">
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => { setVoucherAppId(selectedApp.id); setShowVoucher(true); }}
+                    className="btn-secondary !py-2 text-sm"
+                  >
+                    <Printer className="w-3.5 h-3.5" /> 打印
+                  </button>
+                  <button
+                    onClick={() => { setVoucherAppId(selectedApp.id); setShowVoucher(true); }}
+                    className="btn-secondary !py-2 text-sm"
+                  >
+                    <Download className="w-3.5 h-3.5" /> 导出
+                  </button>
+                </div>
                 <button onClick={() => handleViewDetail(selectedApp.id)} className="btn-primary w-full">
                   <Eye className="w-4 h-4" />
                   查看完整核算详情
@@ -332,6 +350,14 @@ const ApplicationList = () => {
           )}
         </div>
       </div>
+
+      {showVoucher && voucherApp && (
+        <RefundVoucher
+          application={voucherApp}
+          mode="preview"
+          onClose={() => { setShowVoucher(false); setVoucherAppId(null); }}
+        />
+      )}
     </div>
   );
 };

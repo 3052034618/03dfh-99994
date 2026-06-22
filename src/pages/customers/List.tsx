@@ -3,9 +3,9 @@ import { Link, useParams, useNavigate } from 'react-router-dom';
 import {
   Users, Search, ArrowRight, Phone, Mail, MapPin, Calendar,
   FileText, CreditCard, TrendingUp, Send, Bell, ChevronRight,
-  UserCircle, Clock, CheckCircle, AlertTriangle, Eye,
+  UserCircle, Clock, CheckCircle, AlertTriangle, Eye, MessageSquare,
 } from 'lucide-react';
-import { useAppStore } from '@/store';
+import { useAppStore, type CustomerNotification } from '@/store';
 import CustomerInfoCard from '@/components/business/CustomerInfoCard';
 import StatusBadge from '@/components/ui/StatusBadge';
 import { formatCurrency, formatDateTime, formatPhone } from '@/utils/format';
@@ -15,8 +15,10 @@ import clsx from 'clsx';
 const CustomerList = () => {
   const navigate = useNavigate();
   const { id } = useParams<{ id?: string }>();
-  const { customers, applications, originalOrders: orders } = useAppStore();
+  const { customers, applications, originalOrders: orders, sendCustomerNotification, getNotificationsByCustomerId } = useAppStore();
   const [search, setSearch] = useState('');
+  const [notifyTemplate, setNotifyTemplate] = useState<CustomerNotification['templateType']>('refund_confirm');
+  const [notifyChannel, setNotifyChannel] = useState<CustomerNotification['channel']>('短信');
 
   const filtered = customers.filter((c) => {
     if (!search) return true;
@@ -151,29 +153,128 @@ const CustomerList = () => {
           <div className="space-y-5">
             <div className="card p-5">
               <h3 className="section-title">
-                <Bell className="w-4 h-4 text-neutral-500" />
+                <Bell className="w-4 h-4 text-primary-600" />
                 客户通知
+                <span className="ml-auto text-[10px] font-normal text-neutral-400">
+                  累计发送 {getNotificationsByCustomerId(selectedCustomer.id).length} 条
+                </span>
               </h3>
-              <p className="text-xs text-neutral-500 mb-4">选择模板向客户发送消息</p>
-              <div className="space-y-2.5 mb-4">
-                {[
-                  { title: '退款确认单', desc: '含详细退款明细，供客户核对确认' },
-                  { title: '到账提醒', desc: '退款成功，款项已退回原支付账户' },
-                  { title: '审批退回通知', desc: '告知申请被退回原因及修正建议' },
-                ].map((t, idx) => (
-                  <div key={idx} className="p-3 rounded-lg border border-neutral-200 hover:border-primary-300 hover:bg-primary-50/30 cursor-pointer transition-all">
-                    <p className="text-sm font-semibold text-neutral-800 flex items-center gap-2">
-                      <Send className="w-3.5 h-3.5 text-primary-500" />
-                      {t.title}
-                    </p>
-                    <p className="text-[11px] text-neutral-500 mt-0.5">{t.desc}</p>
+
+              <div className="space-y-3 mb-4">
+                <div>
+                  <label className="text-xs text-neutral-500 mb-1 block">通知模板</label>
+                  <div className="space-y-2">
+                    {[
+                      { key: 'refund_confirm' as const, title: '退款确认单', desc: '含详细退款明细，供客户核对确认' },
+                      { key: 'refund_success' as const, title: '到账提醒', desc: '退款成功，款项已退回原支付账户' },
+                      { key: 'refund_reject' as const, title: '审批退回通知', desc: '告知申请被退回原因及修正建议' },
+                    ].map((t) => (
+                      <div
+                        key={t.key}
+                        onClick={() => setNotifyTemplate(t.key)}
+                        className={clsx(
+                          'p-3 rounded-lg border cursor-pointer transition-all',
+                          notifyTemplate === t.key
+                            ? 'border-primary-500 bg-primary-50 shadow-sm'
+                            : 'border-neutral-200 hover:border-primary-300 hover:bg-primary-50/30'
+                        )}
+                      >
+                        <p className="text-sm font-semibold flex items-center gap-2"
+                          style={{ color: notifyTemplate === t.key ? '#1e3a5f' : '#262626' }}>
+                          <Send className={clsx('w-3.5 h-3.5', notifyTemplate === t.key ? 'text-primary-600' : 'text-primary-500')} />
+                          {t.title}
+                        </p>
+                        <p className="text-[11px] text-neutral-500 mt-0.5">{t.desc}</p>
+                      </div>
+                    ))}
                   </div>
-                ))}
+                </div>
+
+                <div>
+                  <label className="text-xs text-neutral-500 mb-1 block">发送渠道</label>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {(['短信', '站内信', '邮件'] as const).map(c => (
+                      <button
+                        key={c}
+                        onClick={() => setNotifyChannel(c)}
+                        className={clsx(
+                          'h-8 rounded border text-xs transition-all',
+                          notifyChannel === c
+                            ? 'border-primary-500 bg-primary-50 text-primary-700 font-medium'
+                            : 'border-neutral-200 text-neutral-500 hover:border-primary-300'
+                        )}
+                      >
+                        {c}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => sendCustomerNotification({
+                    customerId: selectedCustomer.id,
+                    templateType: notifyTemplate,
+                    channel: notifyChannel,
+                  })}
+                  className="btn-primary w-full"
+                >
+                  <Send className="w-4 h-4" />
+                  立即发送{notifyTemplate === 'refund_confirm' ? '退款确认单' : notifyTemplate === 'refund_success' ? '到账提醒' : '审批退回通知'}
+                </button>
               </div>
-              <button className="btn-primary w-full">
-                <Send className="w-4 h-4" />
-                发送退款确认单
-              </button>
+
+              <div className="pt-4 border-t border-neutral-100">
+                <div className="flex items-center justify-between mb-2.5">
+                  <p className="text-xs text-neutral-500 font-medium flex items-center gap-1.5">
+                    <MessageSquare className="w-3.5 h-3.5" />
+                    发送历史记录
+                  </p>
+                </div>
+                {(() => {
+                  const history = getNotificationsByCustomerId(selectedCustomer.id);
+                  if (history.length === 0) {
+                    return (
+                      <div className="py-6 text-center">
+                        <MessageSquare className="w-8 h-8 mx-auto mb-2 opacity-30 text-neutral-400" />
+                        <p className="text-xs text-neutral-400">暂无发送记录</p>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div className="space-y-2 max-h-[280px] overflow-y-auto pr-1">
+                      {history.slice(0, 30).map((n) => (
+                        <div key={n.id} className="p-2.5 rounded-lg border border-neutral-100 bg-neutral-50 hover:bg-neutral-100/70 transition-all">
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="flex items-center gap-1.5">
+                              <span className={clsx(
+                                'text-[10px] font-semibold px-1.5 py-0.5 rounded',
+                                n.templateType === 'refund_confirm' && 'bg-primary-100 text-primary-700',
+                                n.templateType === 'refund_success' && 'bg-success-100 text-success-700',
+                                n.templateType === 'refund_reject' && 'bg-warning-100 text-warning-700',
+                              )}>
+                                {n.templateName}
+                              </span>
+                              <span className="text-[10px] text-neutral-400">{n.channel}</span>
+                            </span>
+                            {n.applicationNo && (
+                              <span className="text-[10px] font-mono text-neutral-400">
+                                {n.applicationNo}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-neutral-600 leading-relaxed line-clamp-2">{n.content}</p>
+                          <div className="flex items-center justify-between mt-1.5 pt-1.5 border-t border-neutral-200/60">
+                            <span className="text-[10px] text-neutral-400">{formatDateTime(n.sentAt)}</span>
+                            <span className="text-[10px] text-neutral-400 flex items-center gap-1">
+                              <UserCircle className="w-3 h-3" /> {n.sentBy}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+              </div>
             </div>
 
             <div className="card p-5">

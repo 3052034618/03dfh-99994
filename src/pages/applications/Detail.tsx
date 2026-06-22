@@ -4,13 +4,14 @@ import {
   ArrowLeft, FileText, Package, Calculator, Users, UserCheck,
   Save, Send, Printer, Download, Check, X, MinusCircle, Plus,
   Wallet, CreditCard, TrendingDown, AlertCircle, Stethoscope, User, Network,
-  MessageSquare, ThumbsUp, ThumbsDown, Building2, Calendar,
+  MessageSquare, ThumbsUp, ThumbsDown, Building2, Calendar, Mail, Bell,
 } from 'lucide-react';
-import { useAppStore } from '@/store';
+import { useAppStore, type CustomerNotification } from '@/store';
 import CustomerInfoCard from '@/components/business/CustomerInfoCard';
 import AmountSplitPanel from '@/components/business/AmountSplitPanel';
 import ApprovalFlow from '@/components/business/ApprovalFlow';
 import DifferenceAlert from '@/components/business/DifferenceAlert';
+import RefundVoucher from '@/components/business/RefundVoucher';
 import StatusBadge from '@/components/ui/StatusBadge';
 import { formatCurrency, formatDateTime, formatNumber } from '@/utils/format';
 import { calculateAmountSplit, calculatePerformanceDeduction, checkPackageDifference, type RefundItemInput } from '@/utils/calculator';
@@ -35,6 +36,7 @@ const ApplicationDetail = () => {
   const {
     applications, handlingFeeRules, updateApplication, submitForReview,
     approveNode, rejectNode, registerRefund, currentUser,
+    sendCustomerNotification, getNotificationsByCustomerId,
   } = useAppStore();
 
   const app = applications.find((a) => a.id === id);
@@ -47,6 +49,9 @@ const ApplicationDetail = () => {
   const [approveModal, setApproveModal] = useState<{ show: boolean; type: 'approve' | 'reject' } | null>(null);
   const [approveOpinion, setApproveOpinion] = useState('');
   const [refundMethod, setRefundMethod] = useState<RefundMethod | null>(app?.refundMethod || null);
+  const [showVoucher, setShowVoucher] = useState(false);
+  const [notifyTemplate, setNotifyTemplate] = useState<CustomerNotification['templateType']>('refund_confirm');
+  const [notifyChannel, setNotifyChannel] = useState<CustomerNotification['channel']>('短信');
 
   if (!app) {
     return (
@@ -211,11 +216,11 @@ const ApplicationDetail = () => {
               确认到账并完成
             </button>
           )}
-          <button className="btn-secondary">
+          <button onClick={() => setShowVoucher(true)} className="btn-secondary">
             <Printer className="w-4 h-4" />
             打印
           </button>
-          <button className="btn-secondary">
+          <button onClick={() => setShowVoucher(true)} className="btn-secondary">
             <Download className="w-4 h-4" />
             导出凭证
           </button>
@@ -573,6 +578,90 @@ const ApplicationDetail = () => {
             </div>
           </div>
 
+          <div className="card p-5">
+            <h3 className="section-title">
+              <Bell className="w-4 h-4 text-primary-600" />
+              客户通知
+              <span className="ml-auto text-[10px] font-normal text-neutral-400">
+                共发送 {getNotificationsByCustomerId(app.customerId).filter(n => n.applicationId === app.id).length} 条
+              </span>
+            </h3>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-neutral-500 mb-1 block">通知模板</label>
+                <select
+                  value={notifyTemplate}
+                  onChange={(e) => setNotifyTemplate(e.target.value as any)}
+                  className="w-full h-9 text-sm rounded border border-neutral-200 px-2 focus:ring-1 focus:ring-primary-500 focus:border-primary-500 outline-none"
+                >
+                  <option value="refund_confirm">退款确认单</option>
+                  <option value="refund_success">到账提醒</option>
+                  <option value="refund_reject">审批退回通知</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-neutral-500 mb-1 block">发送渠道</label>
+                <div className="flex gap-2">
+                  {(['短信', '站内信', '邮件'] as const).map(c => (
+                    <button
+                      key={c}
+                      onClick={() => setNotifyChannel(c)}
+                      className={clsx(
+                        'flex-1 h-8 rounded border text-xs transition-all',
+                        notifyChannel === c
+                          ? 'border-primary-500 bg-primary-50 text-primary-700 font-medium'
+                          : 'border-neutral-200 text-neutral-500 hover:border-primary-300'
+                      )}
+                    >
+                      {c}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <button
+                onClick={() => sendCustomerNotification({
+                  customerId: app.customerId,
+                  templateType: notifyTemplate,
+                  applicationId: app.id,
+                  channel: notifyChannel,
+                })}
+                className="btn-medical w-full !py-2 text-sm"
+              >
+                <Mail className="w-4 h-4" />
+                立即发送客户通知
+              </button>
+
+              <div className="mt-3 pt-3 border-t border-neutral-100">
+                <p className="text-xs text-neutral-500 mb-2 font-medium">发送历史</p>
+                {(() => {
+                  const list = getNotificationsByCustomerId(app.customerId).filter(n => n.applicationId === app.id).slice(0, 8);
+                  if (list.length === 0) {
+                    return <p className="text-xs text-neutral-300 text-center py-3">暂无发送记录</p>;
+                  }
+                  return (
+                    <div className="space-y-2 max-h-[240px] overflow-y-auto pr-1">
+                      {list.map(n => (
+                        <div key={n.id} className="p-2 rounded-lg border border-neutral-100 bg-neutral-50">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] font-semibold text-primary-700 bg-primary-50 px-1.5 py-0.5 rounded">
+                              {n.templateName}
+                            </span>
+                            <span className="text-[10px] text-neutral-400">{n.channel}</span>
+                          </div>
+                          <p className="text-[11px] text-neutral-600 mt-1.5 leading-relaxed line-clamp-2">{n.content}</p>
+                          <div className="flex items-center justify-between mt-1.5 pt-1.5 border-t border-neutral-200/60">
+                            <span className="text-[10px] text-neutral-400">{formatDateTime(n.sentAt)}</span>
+                            <span className="text-[10px] text-neutral-400">{n.sentBy}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+          </div>
+
           {app.remark && !canEdit && (
             <div className="card p-5">
               <h3 className="section-title">
@@ -633,6 +722,14 @@ const ApplicationDetail = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {showVoucher && (
+        <RefundVoucher
+          application={app}
+          mode="preview"
+          onClose={() => setShowVoucher(false)}
+        />
       )}
     </div>
   );

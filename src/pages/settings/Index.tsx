@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Settings as SettingsIcon, Workflow, FileText, Wallet, Shield, ListChecks,
   ChevronRight, Plus, Trash2, Edit2, Save, Check, X, AlertCircle,
-  UserCheck, Building2, Clock, Search, Calendar,
+  UserCheck, Building2, Clock, Search, Calendar, RotateCcw,
 } from 'lucide-react';
 import { useAppStore } from '@/store';
 import { formatDateTime } from '@/utils/format';
@@ -20,7 +20,7 @@ const tabs = [
 ];
 
 const Settings = () => {
-  const { handlingFeeRules, auditLogs, stores } = useAppStore();
+  const { handlingFeeRules, auditLogs, stores, saveHandlingFeeRules, resetHandlingFeeRules } = useAppStore();
   const [activeTab, setActiveTab] = useState('approval');
   const [localFeeRules, setLocalFeeRules] = useState(handlingFeeRules);
   const [logFilter, setLogFilter] = useState({ user: '', action: '', startDate: '', endDate: '' });
@@ -31,6 +31,12 @@ const Settings = () => {
     { id: 3, name: '到账登记', role: '前台顾问', required: true, editable: true },
     { id: 4, name: '完成归档', role: '系统', required: true, editable: false },
   ]);
+
+  useEffect(() => {
+    if (activeTab === 'fee') {
+      setLocalFeeRules(handlingFeeRules.map(r => ({ ...r })));
+    }
+  }, [activeTab, handlingFeeRules]);
 
   const filteredLogs = auditLogs.filter((log) => {
     if (logFilter.user && !log.userName.includes(logFilter.user)) return false;
@@ -256,8 +262,20 @@ const Settings = () => {
               </div>
 
               <div className="flex justify-end mt-5 gap-2">
-                <button className="btn-secondary">重置</button>
-                <button className="btn-primary">
+                <button
+                  onClick={() => {
+                    resetHandlingFeeRules();
+                    setLocalFeeRules([...useAppStore.getState().handlingFeeRules]);
+                  }}
+                  className="btn-secondary"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  重置
+                </button>
+                <button
+                  onClick={() => saveHandlingFeeRules(localFeeRules)}
+                  className="btn-primary"
+                >
                   <Save className="w-4 h-4" />
                   保存规则
                 </button>

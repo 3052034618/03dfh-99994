@@ -88,15 +88,28 @@ const ApplicationDetail = () => {
     setRefundItems(newMap);
   };
 
-  const handleSave = () => {
+  const validateRefund = (): { ok: boolean; msg?: string } => {
     const totalRefund = refundItemInputs.reduce((s, r) => s + r.refundCount, 0);
     if (totalRefund === 0) {
-      alert('请至少选择一个退项项目');
-      return;
+      return { ok: false, msg: '请至少选择一个退项项目' };
     }
     if (hasDifference && !differenceReason.trim()) {
-      alert('请填写套餐拆项差异原因');
-      return;
+      return { ok: false, msg: '检测到套餐拆项差异，请先填写差异原因说明' };
+    }
+    if (calc.totalActualRefund <= 0 && calc.totalCardDeduction <= 0 && calc.totalGiftDeduction <= 0 && calc.totalDebtDeduction <= 0) {
+      return { ok: false, msg: '退款金额不能为0，请先设置退项项目' };
+    }
+    if (app.finalRefund !== undefined && calc.finalRefund < 0) {
+      return { ok: false, msg: '实退金额计算异常，请重新调整退项' };
+    }
+    return { ok: true };
+  };
+
+  const handleSave = (): boolean => {
+    const v = validateRefund();
+    if (!v.ok) {
+      alert(`核算校验未通过：${v.msg}`);
+      return false;
     }
 
     const updatedItems: OrderItem[] = order.items.map((item) => ({
@@ -117,13 +130,20 @@ const ApplicationDetail = () => {
       hasDifference,
       differenceReason: differenceReason || undefined,
       remark: remark || undefined,
-    });
+    }, '手动保存核算数据');
 
     setEditable(false);
+    return true;
   };
 
   const handleSubmitReview = () => {
-    handleSave();
+    const v = validateRefund();
+    if (!v.ok) {
+      alert(`提交校验未通过：${v.msg}\n\n请先完成核算并保存后再提交财务复核。`);
+      return;
+    }
+    const saved = handleSave();
+    if (!saved) return;
     submitForReview(app.id);
     setEditable(false);
   };

@@ -431,7 +431,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       get().addNotification('error', '未找到客户信息');
       return null;
     }
+    if (!applicationId) {
+      get().addNotification('error', '请先选择要关联的退款申请再发送通知');
+      return null;
+    }
     const app = applicationId ? get().getApplicationById(applicationId) : undefined;
+    if (!app) {
+      get().addNotification('error', '关联的退款申请不存在');
+      return null;
+    }
     const template = templateMap[templateType];
     const now = dayjs().format('YYYY-MM-DD HH:mm:ss');
     const notif: CustomerNotification = {
@@ -452,7 +460,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       '发送通知',
       '客户通知',
       customerId,
-      `向${customer.name}发送${template.name}（${channel}）${applicationId ? `，关联申请${app?.applicationNo}` : ''}`
+      `向${customer.name}发送${template.name}（${channel}），关联申请${app?.applicationNo}`
     );
     get().addNotification('success', `已发送${template.name}至${customer.name}`);
     get().persist();

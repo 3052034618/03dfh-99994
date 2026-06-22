@@ -23,6 +23,7 @@ const Settings = () => {
   const { handlingFeeRules, auditLogs, stores, saveHandlingFeeRules, resetHandlingFeeRules } = useAppStore();
   const [activeTab, setActiveTab] = useState('approval');
   const [localFeeRules, setLocalFeeRules] = useState(handlingFeeRules);
+  const [feeRulesSnapshot, setFeeRulesSnapshot] = useState<typeof handlingFeeRules>([]);
   const [logFilter, setLogFilter] = useState({ user: '', action: '', startDate: '', endDate: '' });
   const [approvalNodes, setApprovalNodes] = useState([
     { id: 0, name: '创建申请', role: '前台顾问', required: true, editable: false },
@@ -34,7 +35,9 @@ const Settings = () => {
 
   useEffect(() => {
     if (activeTab === 'fee') {
-      setLocalFeeRules(handlingFeeRules.map(r => ({ ...r })));
+      const fresh = handlingFeeRules.map(r => ({ ...r }));
+      setLocalFeeRules(fresh);
+      setFeeRulesSnapshot(fresh.map(r => ({ ...r })));
     }
   }, [activeTab, handlingFeeRules]);
 
@@ -264,13 +267,24 @@ const Settings = () => {
               <div className="flex justify-end mt-5 gap-2">
                 <button
                   onClick={() => {
-                    resetHandlingFeeRules();
-                    setLocalFeeRules([...useAppStore.getState().handlingFeeRules]);
+                    if (feeRulesSnapshot.length === 0) return;
+                    setLocalFeeRules(feeRulesSnapshot.map(r => ({ ...r })));
+                    useAppStore.getState().addNotification('info', '已恢复到进入设置页面时的规则值，未保存');
                   }}
                   className="btn-secondary"
+                  title="恢复到进入本页时的配置值"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
-                  重置
+                  重置（回当前编辑前）
+                </button>
+                <button
+                  onClick={() => {
+                    resetHandlingFeeRules();
+                  }}
+                  className="btn-ghost"
+                  title="恢复系统出厂默认值（写入并生效）"
+                >
+                  恢复默认
                 </button>
                 <button
                   onClick={() => saveHandlingFeeRules(localFeeRules)}

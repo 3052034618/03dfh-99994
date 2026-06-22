@@ -19,6 +19,7 @@ const CustomerList = () => {
   const [search, setSearch] = useState('');
   const [notifyTemplate, setNotifyTemplate] = useState<CustomerNotification['templateType']>('refund_confirm');
   const [notifyChannel, setNotifyChannel] = useState<CustomerNotification['channel']>('短信');
+  const [notifyAppId, setNotifyAppId] = useState<string>('');
 
   const filtered = customers.filter((c) => {
     if (!search) return true;
@@ -162,6 +163,43 @@ const CustomerList = () => {
 
               <div className="space-y-3 mb-4">
                 <div>
+                  <label className="text-xs text-neutral-500 mb-1 block flex items-center gap-1">
+                    关联退款申请 <span className="text-danger-600">*</span>
+                    <span className="text-[10px] text-neutral-400 ml-auto">
+                      {customerApps.length === 0 ? '该客户暂无退款申请' : `共 ${customerApps.length} 条退款申请`}
+                    </span>
+                  </label>
+                  {customerApps.length === 0 ? (
+                    <div className="p-3 rounded-lg bg-neutral-50 border border-dashed border-neutral-200 text-xs text-neutral-400 flex items-start gap-2">
+                      <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5 text-warning-500" />
+                      <span>
+                        该客户暂无退款申请记录，无法发送退款相关通知。
+                        请先在<a className="text-primary-600 underline mx-1" onClick={(e) => { e.preventDefault(); navigate('/applications/new'); }}>新建退款申请</a>
+                        后再发送通知。
+                      </span>
+                    </div>
+                  ) : (
+                    <select
+                      value={notifyAppId || customerApps[0]?.id || ''}
+                      onChange={(e) => setNotifyAppId(e.target.value)}
+                      className="w-full h-10 text-sm rounded-lg border border-neutral-200 px-3 focus:ring-1 focus:ring-primary-500 focus:border-primary-500 outline-none"
+                    >
+                      {customerApps.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.applicationNo} · 实退 {formatCurrency(a.finalRefund)} · {a.status} · {formatDateTime(a.createdAt).slice(0, 16)}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  {(notifyAppId || customerApps[0]?.id) && (
+                    <div className="mt-2 p-2 rounded bg-primary-50/60 border border-primary-100 text-[11px] text-primary-700 flex items-center gap-1.5">
+                      <FileText className="w-3 h-3" />
+                      通知中将自动带入申请号 {customerApps.find(a => a.id === (notifyAppId || customerApps[0]?.id))?.applicationNo}、金额等信息
+                    </div>
+                  )}
+                </div>
+
+                <div>
                   <label className="text-xs text-neutral-500 mb-1 block">通知模板</label>
                   <div className="space-y-2">
                     {[
@@ -171,16 +209,17 @@ const CustomerList = () => {
                     ].map((t) => (
                       <div
                         key={t.key}
-                        onClick={() => setNotifyTemplate(t.key)}
+                        onClick={() => customerApps.length > 0 && setNotifyTemplate(t.key)}
                         className={clsx(
-                          'p-3 rounded-lg border cursor-pointer transition-all',
-                          notifyTemplate === t.key
+                          'p-3 rounded-lg border transition-all',
+                          customerApps.length === 0 ? 'opacity-50 cursor-not-allowed border-neutral-100 bg-neutral-50' : 'cursor-pointer',
+                          notifyTemplate === t.key && customerApps.length > 0
                             ? 'border-primary-500 bg-primary-50 shadow-sm'
                             : 'border-neutral-200 hover:border-primary-300 hover:bg-primary-50/30'
                         )}
                       >
                         <p className="text-sm font-semibold flex items-center gap-2"
-                          style={{ color: notifyTemplate === t.key ? '#1e3a5f' : '#262626' }}>
+                          style={{ color: notifyTemplate === t.key && customerApps.length > 0 ? '#1e3a5f' : '#262626' }}>
                           <Send className={clsx('w-3.5 h-3.5', notifyTemplate === t.key ? 'text-primary-600' : 'text-primary-500')} />
                           {t.title}
                         </p>
@@ -196,9 +235,11 @@ const CustomerList = () => {
                     {(['短信', '站内信', '邮件'] as const).map(c => (
                       <button
                         key={c}
+                        disabled={customerApps.length === 0}
                         onClick={() => setNotifyChannel(c)}
                         className={clsx(
                           'h-8 rounded border text-xs transition-all',
+                          customerApps.length === 0 && 'opacity-50 cursor-not-allowed',
                           notifyChannel === c
                             ? 'border-primary-500 bg-primary-50 text-primary-700 font-medium'
                             : 'border-neutral-200 text-neutral-500 hover:border-primary-300'
@@ -211,12 +252,21 @@ const CustomerList = () => {
                 </div>
 
                 <button
-                  onClick={() => sendCustomerNotification({
-                    customerId: selectedCustomer.id,
-                    templateType: notifyTemplate,
-                    channel: notifyChannel,
-                  })}
-                  className="btn-primary w-full"
+                  disabled={customerApps.length === 0 || !(notifyAppId || customerApps[0]?.id)}
+                  onClick={() => {
+                    const targetAppId = notifyAppId || customerApps[0]?.id;
+                    if (!targetAppId) return;
+                    sendCustomerNotification({
+                      customerId: selectedCustomer.id,
+                      templateType: notifyTemplate,
+                      applicationId: targetAppId,
+                      channel: notifyChannel,
+                    });
+                  }}
+                  className={clsx(
+                    'btn-primary w-full',
+                    (customerApps.length === 0 || !(notifyAppId || customerApps[0]?.id)) && 'opacity-60 cursor-not-allowed'
+                  )}
                 >
                   <Send className="w-4 h-4" />
                   立即发送{notifyTemplate === 'refund_confirm' ? '退款确认单' : notifyTemplate === 'refund_success' ? '到账提醒' : '审批退回通知'}

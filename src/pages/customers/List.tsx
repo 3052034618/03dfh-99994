@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import {
   Users, Search, ArrowRight, Phone, Mail, MapPin, Calendar,
   FileText, CreditCard, TrendingUp, Send, Bell, ChevronRight,
   UserCircle, Clock, CheckCircle, AlertTriangle, Eye, MessageSquare,
+  Sparkles, ExternalLink,
 } from 'lucide-react';
 import { useAppStore, type CustomerNotification } from '@/store';
 import CustomerInfoCard from '@/components/business/CustomerInfoCard';
@@ -11,6 +12,22 @@ import StatusBadge from '@/components/ui/StatusBadge';
 import { formatCurrency, formatDateTime, formatPhone } from '@/utils/format';
 import { MEMBER_LEVEL_COLORS } from '@/utils/constants';
 import clsx from 'clsx';
+
+const STATUS_TEMPLATE_RECOMMEND: Record<string, CustomerNotification['templateType']> = {
+  '草稿': 'refund_confirm',
+  '待财务复核': 'refund_confirm',
+  '财务退回': 'refund_reject',
+  '待店长审批': 'refund_confirm',
+  '店长驳回': 'refund_reject',
+  '待到账登记': 'refund_success',
+  '已完成': 'refund_success',
+};
+
+const TEMPLATE_META: { key: CustomerNotification['templateType']; title: string; desc: string; color: string }[] = [
+  { key: 'refund_confirm', title: '退款确认单', desc: '含详细退款明细，供客户核对确认', color: 'primary' },
+  { key: 'refund_success', title: '到账提醒', desc: '退款成功，款项已退回原支付账户', color: 'success' },
+  { key: 'refund_reject', title: '审批退回通知', desc: '告知申请被退回原因及修正建议', color: 'warning' },
+];
 
 const CustomerList = () => {
   const navigate = useNavigate();
@@ -20,6 +37,7 @@ const CustomerList = () => {
   const [notifyTemplate, setNotifyTemplate] = useState<CustomerNotification['templateType']>('refund_confirm');
   const [notifyChannel, setNotifyChannel] = useState<CustomerNotification['channel']>('短信');
   const [notifyAppId, setNotifyAppId] = useState<string>('');
+  const [expandedNotifId, setExpandedNotifId] = useState<string | null>(null);
 
   const filtered = customers.filter((c) => {
     if (!search) return true;
@@ -32,6 +50,27 @@ const CustomerList = () => {
   const selectedCustomer = id ? customers.find((c) => c.id === id) : null;
   const customerApps = selectedCustomer ? applications.filter((a) => a.customerId === selectedCustomer.id) : [];
   const customerOrders = selectedCustomer ? orders.filter((o) => o.customerId === selectedCustomer.id) : [];
+
+  const selectedApp = useMemo(() => {
+    if (!notifyAppId || !selectedCustomer) return customerApps[0] || null;
+    return customerApps.find(a => a.id === notifyAppId) || customerApps[0] || null;
+  }, [notifyAppId, customerApps, selectedCustomer]);
+
+  useEffect(() => {
+    if (selectedCustomer) {
+      setNotifyAppId('');
+      setNotifyTemplate('refund_confirm');
+      setNotifyChannel('短信');
+      setExpandedNotifId(null);
+    }
+  }, [selectedCustomer?.id]);
+
+  useEffect(() => {
+    if (selectedApp) {
+      const recommended = STATUS_TEMPLATE_RECOMMEND[selectedApp.status];
+      if (recommended) setNotifyTemplate(recommended);
+    }
+  }, [selectedApp?.id, selectedApp?.status]);
 
   const navigateCustomer = (cid: string) => {
     navigate(`/customers/${cid}`);
@@ -180,7 +219,7 @@ const CustomerList = () => {
                     </div>
                   ) : (
                     <select
-                      value={notifyAppId || customerApps[0]?.id || ''}
+                      value={selectedApp?.id || ''}
                       onChange={(e) => setNotifyAppId(e.target.value)}
                       className="w-full h-10 text-sm rounded-lg border border-neutral-200 px-3 focus:ring-1 focus:ring-primary-500 focus:border-primary-500 outline-none"
                     >
@@ -191,41 +230,64 @@ const CustomerList = () => {
                       ))}
                     </select>
                   )}
-                  {(notifyAppId || customerApps[0]?.id) && (
-                    <div className="mt-2 p-2 rounded bg-primary-50/60 border border-primary-100 text-[11px] text-primary-700 flex items-center gap-1.5">
-                      <FileText className="w-3 h-3" />
-                      通知中将自动带入申请号 {customerApps.find(a => a.id === (notifyAppId || customerApps[0]?.id))?.applicationNo}、金额等信息
-                    </div>
-                  )}
                 </div>
 
+                {selectedApp && (
+                  <div className="p-3 rounded-lg bg-primary-50/50 border border-primary-100 space-y-2">
+                    <p className="text-[11px] font-semibold text-primary-700 flex items-center gap-1.5 mb-1">
+                      <FileText className="w-3.5 h-3.5" />
+                      申请信息摘要
+                    </p>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px]">
+                      <div><span className="text-neutral-400">客户：</span><span className="text-neutral-700 font-medium">{selectedApp.customer.name}</span></div>
+                      <div><span className="text-neutral-400">申请号：</span><span className="font-mono text-primary-700">{selectedApp.applicationNo}</span></div>
+                      <div><span className="text-neutral-400">实退金额：</span><span className="font-mono font-semibold text-danger-700">{formatCurrency(selectedApp.finalRefund)}</span></div>
+                      <div><span className="text-neutral-400">退款方式：</span><span className="text-neutral-700">{selectedApp.refundMethod || '待登记'}</span></div>
+                      <div><span className="text-neutral-400">当前状态：</span><StatusBadge status={selectedApp.status} /></div>
+                      <div><span className="text-neutral-400">手续费：</span><span className="font-mono text-neutral-600">{formatCurrency(selectedApp.handlingFee)}</span></div>
+                    </div>
+                  </div>
+                )}
+
                 <div>
-                  <label className="text-xs text-neutral-500 mb-1 block">通知模板</label>
+                  <label className="text-xs text-neutral-500 mb-1 block flex items-center gap-1">
+                    通知模板
+                    {selectedApp && STATUS_TEMPLATE_RECOMMEND[selectedApp.status] && (
+                      <span className="ml-auto flex items-center gap-1 text-[10px] text-medical-600">
+                        <Sparkles className="w-3 h-3" />
+                        推荐：{TEMPLATE_META.find(t => t.key === STATUS_TEMPLATE_RECOMMEND[selectedApp.status])?.title}
+                      </span>
+                    )}
+                  </label>
                   <div className="space-y-2">
-                    {[
-                      { key: 'refund_confirm' as const, title: '退款确认单', desc: '含详细退款明细，供客户核对确认' },
-                      { key: 'refund_success' as const, title: '到账提醒', desc: '退款成功，款项已退回原支付账户' },
-                      { key: 'refund_reject' as const, title: '审批退回通知', desc: '告知申请被退回原因及修正建议' },
-                    ].map((t) => (
-                      <div
-                        key={t.key}
-                        onClick={() => customerApps.length > 0 && setNotifyTemplate(t.key)}
-                        className={clsx(
-                          'p-3 rounded-lg border transition-all',
-                          customerApps.length === 0 ? 'opacity-50 cursor-not-allowed border-neutral-100 bg-neutral-50' : 'cursor-pointer',
-                          notifyTemplate === t.key && customerApps.length > 0
-                            ? 'border-primary-500 bg-primary-50 shadow-sm'
-                            : 'border-neutral-200 hover:border-primary-300 hover:bg-primary-50/30'
-                        )}
-                      >
-                        <p className="text-sm font-semibold flex items-center gap-2"
-                          style={{ color: notifyTemplate === t.key && customerApps.length > 0 ? '#1e3a5f' : '#262626' }}>
-                          <Send className={clsx('w-3.5 h-3.5', notifyTemplate === t.key ? 'text-primary-600' : 'text-primary-500')} />
-                          {t.title}
-                        </p>
-                        <p className="text-[11px] text-neutral-500 mt-0.5">{t.desc}</p>
-                      </div>
-                    ))}
+                    {TEMPLATE_META.map((t) => {
+                      const isRecommended = selectedApp && STATUS_TEMPLATE_RECOMMEND[selectedApp.status] === t.key;
+                      return (
+                        <div
+                          key={t.key}
+                          onClick={() => customerApps.length > 0 && setNotifyTemplate(t.key)}
+                          className={clsx(
+                            'p-3 rounded-lg border transition-all relative',
+                            customerApps.length === 0 ? 'opacity-50 cursor-not-allowed border-neutral-100 bg-neutral-50' : 'cursor-pointer',
+                            notifyTemplate === t.key && customerApps.length > 0
+                              ? 'border-primary-500 bg-primary-50 shadow-sm'
+                              : 'border-neutral-200 hover:border-primary-300 hover:bg-primary-50/30'
+                          )}
+                        >
+                          {isRecommended && customerApps.length > 0 && (
+                            <span className="absolute top-1.5 right-2 text-[9px] bg-medical-100 text-medical-700 px-1.5 py-0.5 rounded font-medium flex items-center gap-0.5">
+                              <Sparkles className="w-2.5 h-2.5" /> 推荐
+                            </span>
+                          )}
+                          <p className="text-sm font-semibold flex items-center gap-2"
+                            style={{ color: notifyTemplate === t.key && customerApps.length > 0 ? '#1e3a5f' : '#262626' }}>
+                            <Send className={clsx('w-3.5 h-3.5', notifyTemplate === t.key ? 'text-primary-600' : 'text-primary-500')} />
+                            {t.title}
+                          </p>
+                          <p className="text-[11px] text-neutral-500 mt-0.5">{t.desc}</p>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
 
@@ -245,31 +307,43 @@ const CustomerList = () => {
                             : 'border-neutral-200 text-neutral-500 hover:border-primary-300'
                         )}
                       >
-                        {c}
+                        {c === '短信' ? '📱' : c === '站内信' ? '💬' : '📧'} {c}
                       </button>
                     ))}
                   </div>
                 </div>
 
+                {selectedApp && (
+                  <div className="p-3 rounded-lg bg-neutral-50 border border-neutral-200">
+                    <p className="text-[11px] font-semibold text-neutral-600 mb-2 flex items-center gap-1.5">
+                      <Mail className="w-3.5 h-3.5" />
+                      发送预览 · {notifyChannel}
+                    </p>
+                    <div className="p-3 rounded-lg bg-white border border-neutral-200 text-[11px] text-neutral-700 leading-relaxed whitespace-pre-wrap">
+                      {buildPreviewContent(selectedApp, notifyTemplate, selectedCustomer)}
+                    </div>
+                    <p className="text-[10px] text-neutral-400 mt-1.5">💡 切换模板或渠道，预览内容将自动更新</p>
+                  </div>
+                )}
+
                 <button
-                  disabled={customerApps.length === 0 || !(notifyAppId || customerApps[0]?.id)}
+                  disabled={customerApps.length === 0 || !selectedApp}
                   onClick={() => {
-                    const targetAppId = notifyAppId || customerApps[0]?.id;
-                    if (!targetAppId) return;
+                    if (!selectedApp) return;
                     sendCustomerNotification({
                       customerId: selectedCustomer.id,
                       templateType: notifyTemplate,
-                      applicationId: targetAppId,
+                      applicationId: selectedApp.id,
                       channel: notifyChannel,
                     });
                   }}
                   className={clsx(
                     'btn-primary w-full',
-                    (customerApps.length === 0 || !(notifyAppId || customerApps[0]?.id)) && 'opacity-60 cursor-not-allowed'
+                    (customerApps.length === 0 || !selectedApp) && 'opacity-60 cursor-not-allowed'
                   )}
                 >
                   <Send className="w-4 h-4" />
-                  立即发送{notifyTemplate === 'refund_confirm' ? '退款确认单' : notifyTemplate === 'refund_success' ? '到账提醒' : '审批退回通知'}
+                  立即发送{TEMPLATE_META.find(t => t.key === notifyTemplate)?.title || '通知'}
                 </button>
               </div>
 
@@ -291,36 +365,86 @@ const CustomerList = () => {
                     );
                   }
                   return (
-                    <div className="space-y-2 max-h-[280px] overflow-y-auto pr-1">
-                      {history.slice(0, 30).map((n) => (
-                        <div key={n.id} className="p-2.5 rounded-lg border border-neutral-100 bg-neutral-50 hover:bg-neutral-100/70 transition-all">
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="flex items-center gap-1.5">
-                              <span className={clsx(
-                                'text-[10px] font-semibold px-1.5 py-0.5 rounded',
-                                n.templateType === 'refund_confirm' && 'bg-primary-100 text-primary-700',
-                                n.templateType === 'refund_success' && 'bg-success-100 text-success-700',
-                                n.templateType === 'refund_reject' && 'bg-warning-100 text-warning-700',
-                              )}>
-                                {n.templateName}
-                              </span>
-                              <span className="text-[10px] text-neutral-400">{n.channel}</span>
-                            </span>
-                            {n.applicationNo && (
-                              <span className="text-[10px] font-mono text-neutral-400">
-                                {n.applicationNo}
-                              </span>
+                    <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
+                      {history.slice(0, 30).map((n) => {
+                        const isExpanded = expandedNotifId === n.id;
+                        return (
+                          <div key={n.id}
+                            className={clsx(
+                              'rounded-lg border transition-all',
+                              isExpanded ? 'border-primary-200 bg-primary-50/30' : 'border-neutral-100 bg-neutral-50 hover:bg-neutral-100/70'
                             )}
+                          >
+                            <div
+                              className="p-2.5 cursor-pointer"
+                              onClick={() => setExpandedNotifId(isExpanded ? null : n.id)}
+                            >
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="flex items-center gap-1.5">
+                                  <span className={clsx(
+                                    'text-[10px] font-semibold px-1.5 py-0.5 rounded',
+                                    n.templateType === 'refund_confirm' && 'bg-primary-100 text-primary-700',
+                                    n.templateType === 'refund_success' && 'bg-success-100 text-success-700',
+                                    n.templateType === 'refund_reject' && 'bg-warning-100 text-warning-700',
+                                  )}>
+                                    {n.templateName}
+                                  </span>
+                                  <span className="text-[10px] text-neutral-400">{n.channel}</span>
+                                </span>
+                                <span className="flex items-center gap-2">
+                                  {n.applicationNo && (
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        const app = applications.find(a => a.applicationNo === n.applicationNo);
+                                        if (app) navigate(`/applications/${app.id}`);
+                                      }}
+                                      className="text-[10px] font-mono text-primary-600 hover:text-primary-800 flex items-center gap-0.5"
+                                    >
+                                      {n.applicationNo} <ExternalLink className="w-2.5 h-2.5" />
+                                    </button>
+                                  )}
+                                  <ChevronRight className={clsx('w-3 h-3 text-neutral-300 transition-transform', isExpanded && 'rotate-90')} />
+                                </span>
+                              </div>
+                              <p className={clsx('text-[11px] text-neutral-600 leading-relaxed', isExpanded ? '' : 'line-clamp-2')}>
+                                {n.content}
+                              </p>
+                              <div className="flex items-center justify-between mt-1.5 pt-1.5 border-t border-neutral-200/60">
+                                <span className="text-[10px] text-neutral-400">{formatDateTime(n.sentAt)}</span>
+                                <span className="text-[10px] text-neutral-400 flex items-center gap-1">
+                                  <UserCircle className="w-3 h-3" /> {n.sentBy}
+                                </span>
+                              </div>
+                            </div>
+                            {isExpanded && n.applicationId && (() => {
+                              const linkedApp = applications.find(a => a.id === n.applicationId);
+                              if (!linkedApp) return null;
+                              return (
+                                <div className="px-2.5 pb-2.5 pt-0">
+                                  <div className="p-2 rounded-lg bg-white border border-neutral-200 text-[10px]">
+                                    <p className="font-semibold text-neutral-600 mb-1.5">关联申请详情</p>
+                                    <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+                                      <div><span className="text-neutral-400">申请号：</span><span className="font-mono text-primary-700">{linkedApp.applicationNo}</span></div>
+                                      <div><span className="text-neutral-400">实退：</span><span className="font-mono text-danger-700">{formatCurrency(linkedApp.finalRefund)}</span></div>
+                                      <div><span className="text-neutral-400">状态：</span><StatusBadge status={linkedApp.status} /></div>
+                                      <div><span className="text-neutral-400">退款方式：</span><span className="text-neutral-700">{linkedApp.refundMethod || '待登记'}</span></div>
+                                      <div><span className="text-neutral-400">门店：</span><span className="text-neutral-700">{linkedApp.storeName}</span></div>
+                                      <div><span className="text-neutral-400">创建：</span><span className="text-neutral-600">{formatDateTime(linkedApp.createdAt).slice(0, 16)}</span></div>
+                                    </div>
+                                    <button
+                                      onClick={() => navigate(`/applications/${linkedApp.id}`)}
+                                      className="mt-2 text-primary-600 hover:text-primary-800 font-medium flex items-center gap-1"
+                                    >
+                                      <Eye className="w-3 h-3" /> 查看核算详情
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })()}
                           </div>
-                          <p className="text-[11px] text-neutral-600 leading-relaxed line-clamp-2">{n.content}</p>
-                          <div className="flex items-center justify-between mt-1.5 pt-1.5 border-t border-neutral-200/60">
-                            <span className="text-[10px] text-neutral-400">{formatDateTime(n.sentAt)}</span>
-                            <span className="text-[10px] text-neutral-400 flex items-center gap-1">
-                              <UserCircle className="w-3 h-3" /> {n.sentBy}
-                            </span>
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   );
                 })()}
@@ -429,5 +553,19 @@ const CustomerList = () => {
     </div>
   );
 };
+
+function buildPreviewContent(app: { applicationNo: string; customer: { name: string }; finalRefund: number; refundMethod?: string; status: string; handlingFee: number }, templateType: CustomerNotification['templateType'], customer: { name: string } | null): string {
+  const name = customer?.name || app.customer.name || '客户';
+  switch (templateType) {
+    case 'refund_confirm':
+      return `【退款确认】尊敬的${name}您好，您的退款申请${app.applicationNo}已提交，预计实退金额¥${app.finalRefund.toFixed(2)}（含手续费¥${app.handlingFee.toFixed(2)}）。请核对明细，如有疑问请联系客服。`;
+    case 'refund_success':
+      return `【到账提醒】尊敬的${name}您好，退款申请${app.applicationNo}已处理完成，款项¥${app.finalRefund.toFixed(2)}已按${app.refundMethod || '原路退回'}方式处理，预计1-7个工作日内到账。`;
+    case 'refund_reject':
+      return `【退款提醒】尊敬的${name}您好，您的退款申请${app.applicationNo}因信息需要补充，已退回门店处理，门店顾问将在1个工作日内与您联系。`;
+    default:
+      return '';
+  }
+}
 
 export default CustomerList;

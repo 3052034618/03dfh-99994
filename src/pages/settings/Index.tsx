@@ -1,14 +1,16 @@
 import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   Settings as SettingsIcon, Workflow, FileText, Wallet, Shield, ListChecks,
   ChevronRight, Plus, Trash2, Edit2, Save, Check, X, AlertCircle,
   UserCheck, Building2, Clock, Search, Calendar, RotateCcw,
+  ExternalLink, ChevronDown, Eye,
 } from 'lucide-react';
 import { useAppStore } from '@/store';
-import { formatDateTime } from '@/utils/format';
-import type { PaymentMethod } from '@/types';
+import { formatCurrency, formatDateTime } from '@/utils/format';
+import type { PaymentMethod, AuditLog } from '@/types';
 import { PAYMENT_METHODS } from '@/utils/constants';
+import StatusBadge from '@/components/ui/StatusBadge';
 import clsx from 'clsx';
 
 const tabs = [
@@ -20,11 +22,13 @@ const tabs = [
 ];
 
 const Settings = () => {
-  const { handlingFeeRules, auditLogs, stores, saveHandlingFeeRules, resetHandlingFeeRules } = useAppStore();
+  const navigate = useNavigate();
+  const { handlingFeeRules, auditLogs, applications, customers, stores, saveHandlingFeeRules, resetHandlingFeeRules } = useAppStore();
   const [activeTab, setActiveTab] = useState('approval');
   const [localFeeRules, setLocalFeeRules] = useState(handlingFeeRules);
   const [feeRulesSnapshot, setFeeRulesSnapshot] = useState<typeof handlingFeeRules>([]);
-  const [logFilter, setLogFilter] = useState({ user: '', action: '', startDate: '', endDate: '' });
+  const [logFilter, setLogFilter] = useState({ user: '', action: '', startDate: '', endDate: '', applicationNo: '', customerName: '' });
+  const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
   const [approvalNodes, setApprovalNodes] = useState([
     { id: 0, name: '创建申请', role: '前台顾问', required: true, editable: false },
     { id: 1, name: '财务复核', role: '财务主管', required: true, editable: true },
@@ -46,8 +50,29 @@ const Settings = () => {
     if (logFilter.action && !log.action.includes(logFilter.action)) return false;
     if (logFilter.startDate && log.createdAt < logFilter.startDate) return false;
     if (logFilter.endDate && log.createdAt > logFilter.endDate + ' 23:59:59') return false;
+    if (logFilter.applicationNo) {
+      const kw = logFilter.applicationNo.toLowerCase();
+      const app = applications.find(a => a.id === log.targetId);
+      if (!app || !app.applicationNo.toLowerCase().includes(kw)) return false;
+    }
+    if (logFilter.customerName) {
+      const kw = logFilter.customerName.toLowerCase();
+      const app = applications.find(a => a.id === log.targetId);
+      if (!app || !app.customer.name.toLowerCase().includes(kw)) return false;
+    }
     return true;
   });
+
+  const getLinkedApp = (log: AuditLog) => applications.find(a => a.id === log.targetId);
+  const getLinkedCustomer = (log: AuditLog) => {
+    const app = getLinkedApp(log);
+    return app ? customers.find(c => c.id === app.customerId) : undefined;
+  };
+  const getRelatedLogs = (log: AuditLog) => {
+    const app = getLinkedApp(log);
+    if (!app) return [];
+    return auditLogs.filter(l => l.targetId === app.id && l.targetType === '申请').slice(0, 8);
+  };
 
   return (
     <div className="space-y-5 animate-slide-up">
@@ -451,7 +476,7 @@ const Settings = () => {
               <div className="flex items-center justify-between mb-5">
                 <div>
                   <h2 className="text-lg font-bold text-neutral-900">操作日志</h2>
-                  <p className="text-sm text-neutral-500 mt-0.5">全系统操作留痕记录，可按操作人、类型、时间筛选</p>
+                  <p className="text-sm text-neutral-500 mt-0.5">全系统操作留痕记录，可按操作人、申请单号、客户姓名筛选</p>
                 </div>
                 <Link to="/settings/audit-log" className="btn-secondary">
                   展开查看全部
@@ -459,7 +484,7 @@ const Settings = () => {
                 </Link>
               </div>
 
-              <div className="grid grid-cols-4 gap-3 mb-4">
+              <div className="grid grid-cols-6 gap-3 mb-4">
                 <div>
                   <label className="label text-xs">操作人</label>
                   <div className="relative">
@@ -481,12 +506,38 @@ const Settings = () => {
                   >
                     <option value="">全部操作</option>
                     <option>创建申请</option>
+                    <option>保存核算</option>
                     <option>审批通过</option>
                     <option>审批退回</option>
                     <option>提交审批</option>
                     <option>登记到账</option>
+                    <option>发送通知</option>
                     <option>修改配置</option>
                   </select>
+                </div>
+                <div>
+                  <label className="label text-xs">申请单号</label>
+                  <div className="relative">
+                    <FileText className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-400" />
+                    <input
+                      value={logFilter.applicationNo}
+                      onChange={(e) => setLogFilter({ ...logFilter, applicationNo: e.target.value })}
+                      placeholder="RF2026..."
+                      className="input input-sm pl-8 font-mono"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="label text-xs">客户姓名</label>
+                  <div className="relative">
+                    <UserCheck className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-400" />
+                    <input
+                      value={logFilter.customerName}
+                      onChange={(e) => setLogFilter({ ...logFilter, customerName: e.target.value })}
+                      placeholder="搜索客户..."
+                      className="input input-sm pl-8"
+                    />
+                  </div>
                 </div>
                 <div>
                   <label className="label text-xs">开始日期</label>
@@ -514,51 +565,175 @@ const Settings = () => {
                 </div>
               </div>
 
-              <div className="table-wrapper">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>操作时间</th>
-                      <th>操作人</th>
-                      <th>角色</th>
-                      <th>操作类型</th>
-                      <th>对象类型</th>
-                      <th>操作详情</th>
-                      <th className="text-center">IP 地址</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredLogs.map((log) => (
-                      <tr key={log.id}>
-                        <td className="text-xs text-neutral-500 font-mono w-40">{formatDateTime(log.createdAt)}</td>
-                        <td className="font-medium text-neutral-800">{log.userName}</td>
-                        <td>
-                          <span className={clsx(
-                            'badge',
-                            log.userRole === '财务主管' && 'bg-warning-50 text-warning-700 border-warning-200',
-                            log.userRole === '门店店长' && 'bg-medical-50 text-medical-700 border-medical-200',
-                            log.userRole === '前台顾问' && 'bg-primary-50 text-primary-700 border-primary-200',
-                          )}>
-                            {log.userRole}
-                          </span>
-                        </td>
-                        <td>
-                          <span className={clsx(
-                            'badge',
-                            ['创建申请', '提交审批', '登录系统'].includes(log.action) && 'badge-draft',
-                            ['审批通过', '登记到账', '修改配置'].includes(log.action) && 'badge-approved',
-                            log.action === '审批退回' && 'badge-rejected',
-                          )}>
-                            {log.action}
-                          </span>
-                        </td>
-                        <td className="text-sm text-neutral-600">{log.targetType}</td>
-                        <td className="text-sm text-neutral-700 max-w-xs truncate">{log.detail}</td>
-                        <td className="text-center font-mono text-xs text-neutral-500">{log.ip || '-'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="space-y-0">
+                {filteredLogs.length === 0 ? (
+                  <div className="py-16 text-center text-neutral-400">
+                    <ListChecks className="w-10 h-10 mx-auto mb-2 opacity-40" />
+                    <p className="text-sm">无匹配的操作日志</p>
+                  </div>
+                ) : (
+                  filteredLogs.slice(0, 50).map((log) => {
+                    const isExpanded = expandedLogId === log.id;
+                    const linkedApp = getLinkedApp(log);
+                    const linkedCustomer = getLinkedCustomer(log);
+                    const relatedLogs = isExpanded && linkedApp ? getRelatedLogs(log) : [];
+                    return (
+                      <div key={log.id} className={clsx(
+                        'border-b last:border-b-0 transition-all',
+                        isExpanded ? 'bg-primary-50/30' : 'hover:bg-neutral-50'
+                      )}>
+                        <div
+                          className="grid grid-cols-12 gap-2 px-4 py-3 items-center cursor-pointer"
+                          onClick={() => setExpandedLogId(isExpanded ? null : log.id)}
+                        >
+                          <div className="col-span-2 text-xs text-neutral-500 font-mono">{formatDateTime(log.createdAt)}</div>
+                          <div className="col-span-1 font-medium text-neutral-800 text-sm">{log.userName}</div>
+                          <div className="col-span-1">
+                            <span className={clsx(
+                              'badge text-[10px]',
+                              log.userRole === '财务主管' && 'bg-warning-50 text-warning-700 border-warning-200',
+                              log.userRole === '门店店长' && 'bg-medical-50 text-medical-700 border-medical-200',
+                              log.userRole === '前台顾问' && 'bg-primary-50 text-primary-700 border-primary-200',
+                            )}>
+                              {log.userRole}
+                            </span>
+                          </div>
+                          <div className="col-span-1">
+                            <span className={clsx(
+                              'badge text-[10px]',
+                              ['创建申请', '提交审批', '保存核算', '登录系统', '发送通知'].includes(log.action) && 'badge-draft',
+                              ['审批通过', '登记到账', '修改配置'].includes(log.action) && 'badge-approved',
+                              log.action === '审批退回' && 'badge-rejected',
+                            )}>
+                              {log.action}
+                            </span>
+                          </div>
+                          <div className="col-span-1 text-xs text-neutral-500">{log.targetType}</div>
+                          <div className="col-span-4 text-sm text-neutral-700 truncate">{log.detail}</div>
+                          <div className="col-span-1 flex items-center justify-end gap-1">
+                            {linkedApp && (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); navigate(`/applications/${linkedApp.id}`); }}
+                                className="w-6 h-6 rounded flex items-center justify-center text-primary-500 hover:bg-primary-50"
+                                title="查看关联申请"
+                              >
+                                <ExternalLink className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                            <ChevronDown className={clsx('w-4 h-4 text-neutral-400 transition-transform', isExpanded && 'rotate-180')} />
+                          </div>
+                        </div>
+
+                        {isExpanded && (
+                          <div className="px-4 pb-4 animate-fade-in">
+                            <div className="rounded-xl border border-neutral-200 bg-white p-4 space-y-4">
+                              <div className="grid grid-cols-2 gap-6">
+                                <div>
+                                  <p className="text-xs font-semibold text-neutral-600 mb-2">关联申请</p>
+                                  {linkedApp ? (
+                                    <div className="space-y-1.5">
+                                      <div className="flex items-center gap-2">
+                                        <span className="font-mono text-sm font-bold text-primary-700">{linkedApp.applicationNo}</span>
+                                        <StatusBadge status={linkedApp.status} />
+                                        <button
+                                          onClick={() => navigate(`/applications/${linkedApp.id}`)}
+                                          className="text-primary-600 hover:text-primary-800"
+                                        >
+                                          <Eye className="w-3.5 h-3.5" />
+                                        </button>
+                                      </div>
+                                      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px]">
+                                        <div><span className="text-neutral-400">门店：</span><span className="text-neutral-700">{linkedApp.storeName}</span></div>
+                                        <div><span className="text-neutral-400">实退：</span><span className="font-mono text-danger-700">{formatCurrency(linkedApp.finalRefund)}</span></div>
+                                        <div><span className="text-neutral-400">退款方式：</span><span className="text-neutral-700">{linkedApp.refundMethod || '待登记'}</span></div>
+                                        <div><span className="text-neutral-400">创建时间：</span><span className="text-neutral-600">{formatDateTime(linkedApp.createdAt).slice(0, 16)}</span></div>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <p className="text-xs text-neutral-400">非申请关联日志</p>
+                                  )}
+                                </div>
+                                <div>
+                                  <p className="text-xs font-semibold text-neutral-600 mb-2">关联客户</p>
+                                  {linkedCustomer ? (
+                                    <div className="space-y-1.5">
+                                      <div className="flex items-center gap-2">
+                                        <span className="font-semibold text-neutral-800">{linkedCustomer.name}</span>
+                                        <span className="badge bg-primary-50 text-primary-700 border-primary-200 text-[10px]">{linkedCustomer.memberLevel}会员</span>
+                                        <button
+                                          onClick={() => navigate(`/customers/${linkedCustomer.id}`)}
+                                          className="text-primary-600 hover:text-primary-800"
+                                        >
+                                          <Eye className="w-3.5 h-3.5" />
+                                        </button>
+                                      </div>
+                                      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px]">
+                                        <div><span className="text-neutral-400">手机：</span><span className="font-mono text-neutral-600">{linkedCustomer.phone}</span></div>
+                                        <div><span className="text-neutral-400">累计消费：</span><span className="font-mono text-neutral-600">{formatCurrency(linkedCustomer.totalSpent)}</span></div>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <p className="text-xs text-neutral-400">非客户关联日志</p>
+                                  )}
+                                </div>
+                              </div>
+
+                              {linkedApp && relatedLogs.length > 1 && (
+                                <div>
+                                  <p className="text-xs font-semibold text-neutral-600 mb-2">
+                                    退款全流程轨迹
+                                    <span className="font-normal text-neutral-400 ml-1">（{relatedLogs.length} 条相关操作）</span>
+                                  </p>
+                                  <div className="relative pl-6">
+                                    <div className="absolute left-2 top-1 bottom-2 w-0.5 bg-gradient-to-b from-primary-300 via-medical-300 to-neutral-200 rounded-full" />
+                                    <div className="space-y-2">
+                                      {relatedLogs.map((rl) => (
+                                        <div key={rl.id} className="relative flex items-start gap-3">
+                                          <div className={clsx(
+                                            'absolute -left-4 w-3 h-3 rounded-full border-2 mt-1',
+                                            ['创建申请', '提交审批', '保存核算', '发送通知'].includes(rl.action) && 'bg-primary-100 border-primary-400',
+                                            ['审批通过', '登记到账'].includes(rl.action) && 'bg-success-100 border-success-400',
+                                            rl.action === '审批退回' && 'bg-danger-100 border-danger-400',
+                                            ['修改配置'].includes(rl.action) && 'bg-neutral-100 border-neutral-400',
+                                          )} />
+                                          <div className="flex-1 text-[11px]">
+                                            <div className="flex items-center gap-2">
+                                              <span className="font-mono text-neutral-400">{formatDateTime(rl.createdAt).slice(5)}</span>
+                                              <span className={clsx(
+                                                'font-medium',
+                                                ['审批通过', '登记到账'].includes(rl.action) && 'text-success-700',
+                                                rl.action === '审批退回' && 'text-danger-700',
+                                                !['审批通过', '登记到账', '审批退回'].includes(rl.action) && 'text-neutral-700',
+                                              )}>{rl.action}</span>
+                                              <span className="text-neutral-400">{rl.userName}</span>
+                                            </div>
+                                            <p className="text-neutral-500 mt-0.5">{rl.detail}</p>
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+
+                              <div className="flex items-center justify-between pt-2 border-t border-neutral-100 text-[10px] text-neutral-400">
+                                <span>日志ID: {log.id} · IP: {log.ip || '-'}</span>
+                                {linkedApp && (
+                                  <button
+                                    onClick={() => navigate(`/applications/${linkedApp.id}`)}
+                                    className="text-primary-600 hover:text-primary-800 font-medium flex items-center gap-1"
+                                  >
+                                    <Eye className="w-3 h-3" /> 查看核算详情
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
               </div>
             </div>
           )}

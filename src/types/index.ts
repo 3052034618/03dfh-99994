@@ -137,6 +137,17 @@ export interface RefundApplication {
   completedAt?: string;
 }
 
+export interface AuditLogStateChange {
+  statusBefore?: string;
+  statusAfter?: string;
+  finalRefundBefore?: number;
+  finalRefundAfter?: number;
+  refundMethodBefore?: string;
+  refundMethodAfter?: string;
+  currentNodeBefore?: number;
+  currentNodeAfter?: number;
+}
+
 export interface AuditLog {
   id: string;
   userId: string;
@@ -148,6 +159,7 @@ export interface AuditLog {
   detail: string;
   ip?: string;
   createdAt: string;
+  stateChange?: AuditLogStateChange;
 }
 
 export interface Store {

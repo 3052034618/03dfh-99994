@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type {
   RefundApplication, ApplicationsFilter, Customer, OriginalOrder,
-  Store, User, AuditLog, HandlingFeeRule, ReportData, ApplicationStatus,
+  Store, User, AuditLog, AuditLogStateChange, HandlingFeeRule, ReportData, ApplicationStatus,
   RefundMethod,
 } from '@/types';
 import { mockApplications, mockAuditLogs } from '@/mock/data/applications';
@@ -86,7 +86,7 @@ interface AppState {
   getPendingApprovals: () => RefundApplication[];
   getProcessedApprovals: () => RefundApplication[];
 
-  addAuditLog: (action: AuditLog['action'], targetType: AuditLog['targetType'], targetId: string, detail: string) => void;
+  addAuditLog: (action: AuditLog['action'], targetType: AuditLog['targetType'], targetId: string, detail: string, stateChange?: AuditLogStateChange) => void;
 
   saveHandlingFeeRules: (rules: HandlingFeeRule[]) => void;
   resetHandlingFeeRules: () => void;
@@ -118,24 +118,42 @@ const rejectStatusMap: Record<number, ApplicationStatus> = {
   2: '店长驳回',
 };
 
-const templateMap: Record<CustomerNotification['templateType'], { name: string; build: (app?: RefundApplication) => string }> = {
+const templateMap: Record<CustomerNotification['templateType'], { name: string; build: (app: RefundApplication | undefined, channel: CustomerNotification['channel']) => string }> = {
   refund_confirm: {
     name: '退款确认单',
-    build: (app) => app
-      ? `【退款确认】尊敬的${app.customer.name}您好，您的退款申请${app.applicationNo}已提交，退款项${app.itemSplits.length}项，预计实退¥${app.finalRefund.toFixed(2)}。请核对明细，如有疑问请联系客服。`
-      : '【退款确认】您好，您的退款申请已提交，请核对明细并与门店确认。',
+    build: (app, channel) => {
+      if (!app) return channel === '短信'
+        ? '【退款确认】您好，您的退款申请已提交，请核对明细。'
+        : '您好，您的退款申请已提交，请核对明细。';
+      const base = `尊敬的${app.customer.name}您好，您的退款申请${app.applicationNo}已提交，预计实退金额¥${app.finalRefund.toFixed(2)}（含手续费¥${app.handlingFee.toFixed(2)}）。请核对明细，如有疑问请联系客服。`;
+      if (channel === '短信') return `【退款确认】${base}`;
+      if (channel === '邮件') return `【医美退款确认单】\n\n${base}\n\n申请单号：${app.applicationNo}\n实退金额：¥${app.finalRefund.toFixed(2)}\n手续费：¥${app.handlingFee.toFixed(2)}\n\n如有疑问请致电 400-XXX-XXXX`;
+      return base;
+    },
   },
   refund_success: {
     name: '到账提醒',
-    build: (app) => app
-      ? `【到账提醒】尊敬的${app.customer.name}您好，退款申请${app.applicationNo}已处理完成，款项¥${app.finalRefund.toFixed(2)}已按${app.refundMethod || '原路退回'}方式处理，预计1-7个工作日内到账。`
-      : '【到账提醒】您好，您的退款已处理完成，款项已按原方式退回，请注意查收。',
+    build: (app, channel) => {
+      if (!app) return channel === '短信'
+        ? '【到账提醒】您好，您的退款已处理完成，请注意查收。'
+        : '您好，您的退款已处理完成，请注意查收。';
+      const base = `${app.customer.name}您好，退款申请${app.applicationNo}已处理完成，款项¥${app.finalRefund.toFixed(2)}已按${app.refundMethod || '原路退回'}方式处理，预计1-7个工作日内到账。`;
+      if (channel === '短信') return `【到账提醒】${base}`;
+      if (channel === '邮件') return `【医美退款到账提醒】\n\n${base}\n\n申请单号：${app.applicationNo}\n到账金额：¥${app.finalRefund.toFixed(2)}\n退款方式：${app.refundMethod || '原路退回'}\n预计到账：1-7个工作日\n\n如有疑问请致电 400-XXX-XXXX`;
+      return base;
+    },
   },
   refund_reject: {
     name: '审批退回通知',
-    build: (app) => app
-      ? `【退款提醒】尊敬的${app.customer.name}您好，您的退款申请${app.applicationNo}因信息需要补充，已退回门店处理，门店顾问将在1个工作日内与您联系。`
-      : '【退款提醒】您好，您的退款申请需要补充信息，门店将尽快与您联系。',
+    build: (app, channel) => {
+      if (!app) return channel === '短信'
+        ? '【退款提醒】您好，您的退款申请需要补充信息，门店将尽快联系您。'
+        : '您好，您的退款申请需要补充信息，门店将尽快联系您。';
+      const base = `${app.customer.name}您好，您的退款申请${app.applicationNo}因信息需要补充，已退回门店处理，门店顾问将在1个工作日内与您联系。`;
+      if (channel === '短信') return `【退款提醒】${base}`;
+      if (channel === '邮件') return `【医美退款申请退回通知】\n\n${base}\n\n申请单号：${app.applicationNo}\n状态：已退回门店\n预计回复：1个工作日内\n\n如有疑问请致电 400-XXX-XXXX`;
+      return base;
+    },
   },
 };
 
@@ -186,7 +204,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   getApplicationById: (id) => get().applications.find((a) => a.id === id),
   selectApplication: (app) => set({ selectedApplication: app }),
 
-  addAuditLog: (action, targetType, targetId, detail) => {
+  addAuditLog: (action, targetType, targetId, detail, stateChange) => {
     const now = dayjs().format('YYYY-MM-DD HH:mm:ss');
     const user = get().currentUser;
     const log: AuditLog = {
@@ -200,6 +218,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       detail,
       createdAt: now,
       ip: '192.168.1.' + (Math.floor(Math.random() * 200) + 1),
+      stateChange,
     };
     set({ auditLogs: [log, ...get().auditLogs].slice(0, 2000) });
     get().persist();
@@ -245,7 +264,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       })(),
     };
     set({ applications: [newApp, ...get().applications] });
-    get().addAuditLog('创建申请', '申请', newApp.id, `创建退款申请 ${newApp.applicationNo}，客户：${customer.name}，原订单：${order.orderNo}`);
+    get().addAuditLog('创建申请', '申请', newApp.id, `创建退款申请 ${newApp.applicationNo}，客户：${customer.name}，原订单：${order.orderNo}`, {
+      statusBefore: undefined,
+      statusAfter: '草稿',
+      currentNodeBefore: undefined,
+      currentNodeAfter: 0,
+    });
     get().addNotification('success', `退款申请已创建：${newApp.applicationNo}`);
     get().persist();
     return newApp;
@@ -254,6 +278,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   updateApplication: (id, data, reason) => {
     const now = dayjs().format('YYYY-MM-DD HH:mm:ss');
     const app = get().getApplicationById(id);
+    const beforeRefund = app?.finalRefund || 0;
+    const beforeMethod = app?.refundMethod;
     let detail = `更新申请 ${app?.applicationNo || id} 核算信息`;
     const changes: string[] = [];
     if (data.actualRefund !== undefined) changes.push(`实收退款变更为¥${data.actualRefund.toFixed(2)}`);
@@ -263,12 +289,25 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (changes.length > 0) detail += `：${changes.join('、')}`;
     if (reason) detail += `（${reason}）`;
 
+    const stateChange: AuditLogStateChange = {
+      statusBefore: app?.status,
+      statusAfter: app?.status,
+      finalRefundBefore: beforeRefund,
+      finalRefundAfter: data.finalRefund !== undefined ? data.finalRefund : beforeRefund,
+      currentNodeBefore: app?.currentNode,
+      currentNodeAfter: app?.currentNode,
+    };
+    if (data.refundMethod && data.refundMethod !== beforeMethod) {
+      stateChange.refundMethodBefore = beforeMethod;
+      stateChange.refundMethodAfter = data.refundMethod;
+    }
+
     set({
       applications: get().applications.map((a) =>
         a.id === id ? { ...a, ...data, updatedAt: now } : a
       ),
     });
-    get().addAuditLog('保存核算', '申请', id, detail);
+    get().addAuditLog('保存核算', '申请', id, detail, stateChange);
     get().persist();
   },
 
@@ -276,6 +315,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     const now = dayjs().format('YYYY-MM-DD HH:mm:ss');
     const node = 1;
     const app = get().getApplicationById(id);
+    const statusBefore = app?.status;
+    const nodeBefore = app?.currentNode;
     set({
       applications: get().applications.map((a) => {
         if (a.id !== id) return a;
@@ -287,7 +328,11 @@ export const useAppStore = create<AppState>((set, get) => ({
         return { ...a, status: statusFlowMap[node], currentNode: node, approvalFlow: newFlow, updatedAt: now };
       }),
     });
-    get().addAuditLog('提交审批', '申请', id, `提交申请 ${app?.applicationNo || id} 至财务复核，实退¥${app?.finalRefund.toFixed(2) || '0.00'}`);
+    get().addAuditLog('提交审批', '申请', id, `提交申请 ${app?.applicationNo || id} 至财务复核，实退¥${app?.finalRefund.toFixed(2) || '0.00'}`, {
+      statusBefore, statusAfter: statusFlowMap[node],
+      currentNodeBefore: nodeBefore, currentNodeAfter: node,
+      finalRefundBefore: app?.finalRefund, finalRefundAfter: app?.finalRefund,
+    });
     get().addNotification('success', '已提交财务复核');
     get().persist();
   },
@@ -298,6 +343,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     const nextNode = nodeIndex + 1;
     const app = get().getApplicationById(id);
     const nodeName = app?.approvalFlow.find(n => n.nodeIndex === nodeIndex)?.nodeName || '未知节点';
+    const statusBefore = app?.status;
+    const nodeBefore = app?.currentNode;
+    const newStatus = nextNode >= 5 ? '已完成' : statusFlowMap[nextNode];
     set({
       applications: get().applications.map((a) => {
         if (a.id !== id) return a;
@@ -319,7 +367,11 @@ export const useAppStore = create<AppState>((set, get) => ({
         };
       }),
     });
-    get().addAuditLog('审批通过', '申请', id, `${user.name}(${user.role})${nodeName}通过：${opinion || '同意'}，申请：${app?.applicationNo}`);
+    get().addAuditLog('审批通过', '申请', id, `${user.name}(${user.role})${nodeName}通过：${opinion || '同意'}，申请：${app?.applicationNo}`, {
+      statusBefore, statusAfter: newStatus,
+      currentNodeBefore: nodeBefore, currentNodeAfter: nextNode,
+      finalRefundBefore: app?.finalRefund, finalRefundAfter: app?.finalRefund,
+    });
     get().addNotification('success', '审批已通过');
     get().persist();
   },
@@ -329,6 +381,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     const user = get().currentUser;
     const app = get().getApplicationById(id);
     const nodeName = app?.approvalFlow.find(n => n.nodeIndex === nodeIndex)?.nodeName || '未知节点';
+    const statusBefore = app?.status;
+    const nodeBefore = app?.currentNode;
+    const newStatus = rejectStatusMap[nodeIndex] || '财务退回';
     set({
       applications: get().applications.map((a) => {
         if (a.id !== id) return a;
@@ -338,10 +393,14 @@ export const useAppStore = create<AppState>((set, get) => ({
           }
           return n;
         });
-        return { ...a, status: rejectStatusMap[nodeIndex] || '财务退回', currentNode: nodeIndex, approvalFlow: newFlow, updatedAt: now };
+        return { ...a, status: newStatus, currentNode: nodeIndex, approvalFlow: newFlow, updatedAt: now };
       }),
     });
-    get().addAuditLog('审批退回', '申请', id, `${user.name}(${user.role})${nodeName}退回：${opinion}，申请：${app?.applicationNo}`);
+    get().addAuditLog('审批退回', '申请', id, `${user.name}(${user.role})${nodeName}退回：${opinion}，申请：${app?.applicationNo}`, {
+      statusBefore, statusAfter: newStatus,
+      currentNodeBefore: nodeBefore, currentNodeAfter: nodeIndex,
+      finalRefundBefore: app?.finalRefund, finalRefundAfter: app?.finalRefund,
+    });
     get().addNotification('warning', '已退回申请');
     get().persist();
   },
@@ -349,6 +408,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   registerRefund: (id, method, relatedOrderId) => {
     const now = dayjs().format('YYYY-MM-DD HH:mm:ss');
     const app = get().getApplicationById(id);
+    const statusBefore = app?.status;
+    const nodeBefore = app?.currentNode;
+    const methodBefore = app?.refundMethod;
     set({
       applications: get().applications.map((a) => {
         if (a.id !== id) return a;
@@ -371,7 +433,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
     let detail = `登记退款方式：${method}，实退¥${app?.finalRefund.toFixed(2)}`;
     if (relatedOrderId) detail += `，关联新订单：${relatedOrderId}`;
-    get().addAuditLog('登记到账', '申请', id, detail + `，申请：${app?.applicationNo}`);
+    get().addAuditLog('登记到账', '申请', id, detail + `，申请：${app?.applicationNo}`, {
+      statusBefore, statusAfter: '已完成',
+      currentNodeBefore: nodeBefore, currentNodeAfter: 5,
+      finalRefundBefore: app?.finalRefund, finalRefundAfter: app?.finalRefund,
+      refundMethodBefore: methodBefore, refundMethodAfter: method,
+    });
     get().addNotification('success', `已登记退款方式：${method}`);
     get().persist();
   },
@@ -450,7 +517,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       templateType,
       applicationId,
       applicationNo: app?.applicationNo,
-      content: template.build(app),
+      content: template.build(app, channel),
       sentBy: get().currentUser.name,
       sentAt: now,
       channel,

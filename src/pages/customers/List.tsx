@@ -32,7 +32,7 @@ const TEMPLATE_META: { key: CustomerNotification['templateType']; title: string;
 const CustomerList = () => {
   const navigate = useNavigate();
   const { id } = useParams<{ id?: string }>();
-  const { customers, applications, originalOrders: orders, sendCustomerNotification, getNotificationsByCustomerId } = useAppStore();
+  const { customers, applications, auditLogs, originalOrders: orders, sendCustomerNotification, getNotificationsByCustomerId } = useAppStore();
   const [search, setSearch] = useState('');
   const [notifyTemplate, setNotifyTemplate] = useState<CustomerNotification['templateType']>('refund_confirm');
   const [notifyChannel, setNotifyChannel] = useState<CustomerNotification['channel']>('短信');
@@ -320,7 +320,7 @@ const CustomerList = () => {
                       发送预览 · {notifyChannel}
                     </p>
                     <div className="p-3 rounded-lg bg-white border border-neutral-200 text-[11px] text-neutral-700 leading-relaxed whitespace-pre-wrap">
-                      {buildPreviewContent(selectedApp, notifyTemplate, selectedCustomer)}
+                      {buildPreviewContent(selectedApp, notifyTemplate, selectedCustomer, notifyChannel)}
                     </div>
                     <p className="text-[10px] text-neutral-400 mt-1.5">💡 切换模板或渠道，预览内容将自动更新</p>
                   </div>
@@ -420,6 +420,12 @@ const CustomerList = () => {
                             {isExpanded && n.applicationId && (() => {
                               const linkedApp = applications.find(a => a.id === n.applicationId);
                               if (!linkedApp) return null;
+                              const notifNodeIdx = (() => {
+                                const appLogs = auditLogs.filter(l => l.targetId === linkedApp.id && l.targetType === '申请' && l.createdAt <= n.sentAt);
+                                const lastLog = appLogs[0];
+                                return lastLog?.stateChange?.currentNodeAfter ?? linkedApp.currentNode;
+                              })();
+                              const nodeNames = ['创建申请', '财务复核', '店长审批', '到账登记', '完成归档'];
                               return (
                                 <div className="px-2.5 pb-2.5 pt-0">
                                   <div className="p-2 rounded-lg bg-white border border-neutral-200 text-[10px]">
@@ -431,6 +437,24 @@ const CustomerList = () => {
                                       <div><span className="text-neutral-400">退款方式：</span><span className="text-neutral-700">{linkedApp.refundMethod || '待登记'}</span></div>
                                       <div><span className="text-neutral-400">门店：</span><span className="text-neutral-700">{linkedApp.storeName}</span></div>
                                       <div><span className="text-neutral-400">创建：</span><span className="text-neutral-600">{formatDateTime(linkedApp.createdAt).slice(0, 16)}</span></div>
+                                    </div>
+                                    <div className="mt-2 pt-2 border-t border-neutral-100">
+                                      <p className="text-neutral-500 mb-1.5">通知发出时退款流程位置</p>
+                                      <div className="flex items-center gap-1">
+                                        {nodeNames.map((nn, idx) => (
+                                          <div key={idx} className="flex items-center gap-1">
+                                            <div className={clsx(
+                                              'px-1.5 py-0.5 rounded text-[9px] font-medium',
+                                              idx < notifNodeIdx ? 'bg-success-100 text-success-700' :
+                                              idx === notifNodeIdx ? 'bg-primary-100 text-primary-700 ring-1 ring-primary-300' :
+                                              'bg-neutral-100 text-neutral-400'
+                                            )}>
+                                              {nn}
+                                            </div>
+                                            {idx < nodeNames.length - 1 && <ChevronRight className="w-2.5 h-2.5 text-neutral-300" />}
+                                          </div>
+                                        ))}
+                                      </div>
                                     </div>
                                     <button
                                       onClick={() => navigate(`/applications/${linkedApp.id}`)}
@@ -554,15 +578,34 @@ const CustomerList = () => {
   );
 };
 
-function buildPreviewContent(app: { applicationNo: string; customer: { name: string }; finalRefund: number; refundMethod?: string; status: string; handlingFee: number }, templateType: CustomerNotification['templateType'], customer: { name: string } | null): string {
+function buildPreviewContent(
+  app: { applicationNo: string; customer: { name: string }; finalRefund: number; refundMethod?: string; status: string; handlingFee: number },
+  templateType: CustomerNotification['templateType'],
+  customer: { name: string } | null,
+  channel: CustomerNotification['channel']
+): string {
   const name = customer?.name || app.customer.name || '客户';
+  const isSMS = channel === '短信';
+  const isEmail = channel === '邮件';
+  const prefix = (tag: string) => isSMS ? `【${tag}】` : '';
+  const emailFooter = isEmail ? '\n\n如有疑问请致电 400-XXX-XXXX' : '';
+
   switch (templateType) {
-    case 'refund_confirm':
-      return `【退款确认】尊敬的${name}您好，您的退款申请${app.applicationNo}已提交，预计实退金额¥${app.finalRefund.toFixed(2)}（含手续费¥${app.handlingFee.toFixed(2)}）。请核对明细，如有疑问请联系客服。`;
-    case 'refund_success':
-      return `【到账提醒】尊敬的${name}您好，退款申请${app.applicationNo}已处理完成，款项¥${app.finalRefund.toFixed(2)}已按${app.refundMethod || '原路退回'}方式处理，预计1-7个工作日内到账。`;
-    case 'refund_reject':
-      return `【退款提醒】尊敬的${name}您好，您的退款申请${app.applicationNo}因信息需要补充，已退回门店处理，门店顾问将在1个工作日内与您联系。`;
+    case 'refund_confirm': {
+      const base = `尊敬的${name}您好，您的退款申请${app.applicationNo}已提交，预计实退金额¥${app.finalRefund.toFixed(2)}（含手续费¥${app.handlingFee.toFixed(2)}）。请核对明细，如有疑问请联系客服。`;
+      if (isEmail) return `【医美退款确认单】\n\n${base}\n\n申请单号：${app.applicationNo}\n实退金额：¥${app.finalRefund.toFixed(2)}\n手续费：¥${app.handlingFee.toFixed(2)}${emailFooter}`;
+      return `${prefix('退款确认')}${base}`;
+    }
+    case 'refund_success': {
+      const base = `${name}您好，退款申请${app.applicationNo}已处理完成，款项¥${app.finalRefund.toFixed(2)}已按${app.refundMethod || '原路退回'}方式处理，预计1-7个工作日内到账。`;
+      if (isEmail) return `【医美退款到账提醒】\n\n${base}\n\n申请单号：${app.applicationNo}\n到账金额：¥${app.finalRefund.toFixed(2)}\n退款方式：${app.refundMethod || '原路退回'}\n预计到账：1-7个工作日${emailFooter}`;
+      return `${prefix('到账提醒')}${base}`;
+    }
+    case 'refund_reject': {
+      const base = `${name}您好，您的退款申请${app.applicationNo}因信息需要补充，已退回门店处理，门店顾问将在1个工作日内与您联系。`;
+      if (isEmail) return `【医美退款申请退回通知】\n\n${base}\n\n申请单号：${app.applicationNo}\n状态：已退回门店\n预计回复：1个工作日内${emailFooter}`;
+      return `${prefix('退款提醒')}${base}`;
+    }
     default:
       return '';
   }

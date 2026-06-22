@@ -678,6 +678,57 @@ const Settings = () => {
                                 </div>
                               </div>
 
+                              {log.stateChange && (
+                                <div className="p-3 rounded-lg bg-neutral-50 border border-neutral-200">
+                                  <p className="text-xs font-semibold text-neutral-600 mb-2">状态变化</p>
+                                  <div className="grid grid-cols-2 gap-4">
+                                    {log.stateChange.statusBefore !== undefined && (
+                                      <>
+                                        <div>
+                                          <p className="text-[10px] text-neutral-400 mb-1">操作前</p>
+                                          <StatusBadge status={log.stateChange.statusBefore || '—'} />
+                                          {log.stateChange.currentNodeBefore !== undefined && (
+                                            <p className="text-[10px] text-neutral-400 mt-1">节点 {log.stateChange.currentNodeBefore}</p>
+                                          )}
+                                        </div>
+                                        <div>
+                                          <p className="text-[10px] text-neutral-400 mb-1">操作后</p>
+                                          <StatusBadge status={log.stateChange.statusAfter || '—'} />
+                                          {log.stateChange.currentNodeAfter !== undefined && (
+                                            <p className="text-[10px] text-neutral-400 mt-1">节点 {log.stateChange.currentNodeAfter}</p>
+                                          )}
+                                        </div>
+                                      </>
+                                    )}
+                                  </div>
+                                  <div className="grid grid-cols-2 gap-4 mt-2 pt-2 border-t border-neutral-200/60">
+                                    {log.stateChange.finalRefundBefore !== undefined && log.stateChange.finalRefundAfter !== undefined && (
+                                      <div>
+                                        <p className="text-[10px] text-neutral-400">实退金额</p>
+                                        <p className="text-[11px]">
+                                          <span className="font-mono text-neutral-500">{formatCurrency(log.stateChange.finalRefundBefore)}</span>
+                                          <span className="mx-1.5 text-neutral-300">→</span>
+                                          <span className={clsx(
+                                            'font-mono font-medium',
+                                            Math.abs(log.stateChange.finalRefundAfter - log.stateChange.finalRefundBefore) > 0.001 ? 'text-warning-700' : 'text-neutral-700'
+                                          )}>{formatCurrency(log.stateChange.finalRefundAfter)}</span>
+                                        </p>
+                                      </div>
+                                    )}
+                                    {(log.stateChange.refundMethodBefore || log.stateChange.refundMethodAfter) && (
+                                      <div>
+                                        <p className="text-[10px] text-neutral-400">退款方式</p>
+                                        <p className="text-[11px]">
+                                          <span className="text-neutral-500">{log.stateChange.refundMethodBefore || '—'}</span>
+                                          <span className="mx-1.5 text-neutral-300">→</span>
+                                          <span className="font-medium text-primary-700">{log.stateChange.refundMethodAfter || '—'}</span>
+                                        </p>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+
                               {linkedApp && relatedLogs.length > 1 && (
                                 <div>
                                   <p className="text-xs font-semibold text-neutral-600 mb-2">

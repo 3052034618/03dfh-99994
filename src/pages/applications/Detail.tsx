@@ -5,6 +5,7 @@ import {
   Save, Send, Printer, Download, Check, X, MinusCircle, Plus,
   Wallet, CreditCard, TrendingDown, AlertCircle, Stethoscope, User, Network,
   MessageSquare, ThumbsUp, ThumbsDown, Building2, Calendar, Mail, Bell,
+  ChevronRight,
 } from 'lucide-react';
 import { useAppStore, type CustomerNotification } from '@/store';
 import CustomerInfoCard from '@/components/business/CustomerInfoCard';
@@ -34,7 +35,7 @@ const ApplicationDetail = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const {
-    applications, handlingFeeRules, updateApplication, submitForReview,
+    applications, handlingFeeRules, auditLogs, updateApplication, submitForReview,
     approveNode, rejectNode, registerRefund, currentUser,
     sendCustomerNotification, getNotificationsByCustomerId,
   } = useAppStore();
@@ -52,6 +53,7 @@ const ApplicationDetail = () => {
   const [showVoucher, setShowVoucher] = useState(false);
   const [notifyTemplate, setNotifyTemplate] = useState<CustomerNotification['templateType']>('refund_confirm');
   const [notifyChannel, setNotifyChannel] = useState<CustomerNotification['channel']>('短信');
+  const [expandedNotifId, setExpandedNotifId] = useState<string | null>(null);
 
   if (!app) {
     return (
@@ -638,6 +640,38 @@ const ApplicationDetail = () => {
                   ))}
                 </div>
               </div>
+
+              <div className="p-2.5 rounded-lg bg-neutral-50 border border-neutral-200">
+                <p className="text-[10px] font-semibold text-neutral-500 mb-1">发送预览</p>
+                <div className="p-2 rounded bg-white border border-neutral-200 text-[11px] text-neutral-700 leading-relaxed whitespace-pre-wrap">
+                  {(() => {
+                    const name = app.customer.name;
+                    const isSMS = notifyChannel === '短信';
+                    const isEmail = notifyChannel === '邮件';
+                    const prefix = (tag: string) => isSMS ? `【${tag}】` : '';
+                    const emailFooter = isEmail ? '\n\n如有疑问请致电 400-XXX-XXXX' : '';
+                    switch (notifyTemplate) {
+                      case 'refund_confirm': {
+                        const base = `尊敬的${name}您好，您的退款申请${app.applicationNo}已提交，预计实退金额¥${app.finalRefund.toFixed(2)}（含手续费¥${app.handlingFee.toFixed(2)}）。请核对明细，如有疑问请联系客服。`;
+                        if (isEmail) return `【医美退款确认单】\n\n${base}\n\n申请单号：${app.applicationNo}\n实退金额：¥${app.finalRefund.toFixed(2)}\n手续费：¥${app.handlingFee.toFixed(2)}${emailFooter}`;
+                        return `${prefix('退款确认')}${base}`;
+                      }
+                      case 'refund_success': {
+                        const base = `${name}您好，退款申请${app.applicationNo}已处理完成，款项¥${app.finalRefund.toFixed(2)}已按${app.refundMethod || '原路退回'}方式处理，预计1-7个工作日内到账。`;
+                        if (isEmail) return `【医美退款到账提醒】\n\n${base}\n\n申请单号：${app.applicationNo}\n到账金额：¥${app.finalRefund.toFixed(2)}\n退款方式：${app.refundMethod || '原路退回'}\n预计到账：1-7个工作日${emailFooter}`;
+                        return `${prefix('到账提醒')}${base}`;
+                      }
+                      case 'refund_reject': {
+                        const base = `${name}您好，您的退款申请${app.applicationNo}因信息需要补充，已退回门店处理，门店顾问将在1个工作日内与您联系。`;
+                        if (isEmail) return `【医美退款申请退回通知】\n\n${base}\n\n申请单号：${app.applicationNo}\n状态：已退回门店\n预计回复：1个工作日内${emailFooter}`;
+                        return `${prefix('退款提醒')}${base}`;
+                      }
+                      default: return '';
+                    }
+                  })()}
+                </div>
+              </div>
+
               <button
                 onClick={() => sendCustomerNotification({
                   customerId: app.customerId,
@@ -654,27 +688,73 @@ const ApplicationDetail = () => {
               <div className="mt-3 pt-3 border-t border-neutral-100">
                 <p className="text-xs text-neutral-500 mb-2 font-medium">发送历史</p>
                 {(() => {
-                  const list = getNotificationsByCustomerId(app.customerId).filter(n => n.applicationId === app.id).slice(0, 8);
+                  const list = getNotificationsByCustomerId(app.customerId).filter(n => n.applicationId === app.id).slice(0, 10);
                   if (list.length === 0) {
                     return <p className="text-xs text-neutral-300 text-center py-3">暂无发送记录</p>;
                   }
                   return (
-                    <div className="space-y-2 max-h-[240px] overflow-y-auto pr-1">
-                      {list.map(n => (
-                        <div key={n.id} className="p-2 rounded-lg border border-neutral-100 bg-neutral-50">
-                          <div className="flex items-center justify-between">
-                            <span className="text-[11px] font-semibold text-primary-700 bg-primary-50 px-1.5 py-0.5 rounded">
-                              {n.templateName}
-                            </span>
-                            <span className="text-[10px] text-neutral-400">{n.channel}</span>
+                    <div className="space-y-2 max-h-[280px] overflow-y-auto pr-1">
+                      {list.map(n => {
+                        const isExpanded = expandedNotifId === n.id;
+                        const notifNodeIdx = (() => {
+                          const appLogs = auditLogs.filter(l => l.targetId === app.id && l.targetType === '申请' && l.createdAt <= n.sentAt);
+                          const lastLog = appLogs[0];
+                          return lastLog?.stateChange?.currentNodeAfter ?? app.currentNode;
+                        })();
+                        const nodeNames = ['创建申请', '财务复核', '店长审批', '到账登记', '完成归档'];
+                        return (
+                          <div key={n.id} className={clsx(
+                            'rounded-lg border transition-all',
+                            isExpanded ? 'border-primary-200 bg-primary-50/30' : 'border-neutral-100 bg-neutral-50'
+                          )}>
+                            <div className="p-2 cursor-pointer" onClick={() => setExpandedNotifId(isExpanded ? null : n.id)}>
+                              <div className="flex items-center justify-between">
+                                <span className="flex items-center gap-1.5">
+                                  <span className={clsx(
+                                    'text-[10px] font-semibold px-1.5 py-0.5 rounded',
+                                    n.templateType === 'refund_confirm' && 'bg-primary-100 text-primary-700',
+                                    n.templateType === 'refund_success' && 'bg-success-100 text-success-700',
+                                    n.templateType === 'refund_reject' && 'bg-warning-100 text-warning-700',
+                                  )}>{n.templateName}</span>
+                                  <span className="text-[10px] text-neutral-400">{n.channel}</span>
+                                </span>
+                                <ChevronRight className={clsx('w-3 h-3 text-neutral-300 transition-transform', isExpanded && 'rotate-90')} />
+                              </div>
+                              <p className={clsx('text-[11px] text-neutral-600 mt-1.5 leading-relaxed', isExpanded ? '' : 'line-clamp-2')}>{n.content}</p>
+                              <div className="flex items-center justify-between mt-1.5 pt-1.5 border-t border-neutral-200/60">
+                                <span className="text-[10px] text-neutral-400">{formatDateTime(n.sentAt)}</span>
+                                <span className="text-[10px] text-neutral-400">{n.sentBy}</span>
+                              </div>
+                            </div>
+                            {isExpanded && (
+                              <div className="px-2 pb-2 pt-0 animate-fade-in">
+                                <div className="p-2 rounded-lg bg-white border border-neutral-200 text-[10px]">
+                                  <p className="text-neutral-500 mb-1.5">通知发出时退款流程位置</p>
+                                  <div className="flex items-center gap-1 flex-wrap">
+                                    {nodeNames.map((nn, idx) => (
+                                      <div key={idx} className="flex items-center gap-1">
+                                        <div className={clsx(
+                                          'px-1.5 py-0.5 rounded text-[9px] font-medium',
+                                          idx < notifNodeIdx ? 'bg-success-100 text-success-700' :
+                                          idx === notifNodeIdx ? 'bg-primary-100 text-primary-700 ring-1 ring-primary-300' :
+                                          'bg-neutral-100 text-neutral-400'
+                                        )}>
+                                          {nn}
+                                        </div>
+                                        {idx < nodeNames.length - 1 && <ChevronRight className="w-2.5 h-2.5 text-neutral-300" />}
+                                      </div>
+                                    ))}
+                                  </div>
+                                  <div className="mt-2 pt-1.5 border-t border-neutral-100 flex items-center gap-3 text-[10px]">
+                                    <span><span className="text-neutral-400">申请号：</span><span className="font-mono text-primary-700">{app.applicationNo}</span></span>
+                                    <span><span className="text-neutral-400">实退：</span><span className="font-mono text-danger-700">{formatCurrency(app.finalRefund)}</span></span>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
                           </div>
-                          <p className="text-[11px] text-neutral-600 mt-1.5 leading-relaxed line-clamp-2">{n.content}</p>
-                          <div className="flex items-center justify-between mt-1.5 pt-1.5 border-t border-neutral-200/60">
-                            <span className="text-[10px] text-neutral-400">{formatDateTime(n.sentAt)}</span>
-                            <span className="text-[10px] text-neutral-400">{n.sentBy}</span>
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   );
                 })()}
